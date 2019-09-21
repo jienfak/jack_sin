@@ -33,5 +33,5 @@ CFLAGS   =    $(INCFLAGS) $(OPTFLAGS) $(WRNFLAGS) $(DEFFLAGS)
 LDFLAGS  = $(LIBFLAGS)
 
 # Compiler and linker.
-CC = tcc
+CC = gcc
 LD = $(CC)
