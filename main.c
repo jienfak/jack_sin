@@ -19,19 +19,26 @@
 #define M_PI  (3.14159265)
 #endif
 
-#define MAX_FREQ (20000)
-#define MIN_FREQ (20)
-#define FREQ_NUM ( MAX_FREQ - MIN_FREQ )
+#define SIZEL(a) (sizeof(a[0]))
+#define HEARABLE_MAX_FREQ (20000)
+#define HEARABLE_MIN_FREQ (20)
+#define HEARABLE_FREQ_NUM ( MAX_FREQ - MIN_FREQ )
+#define ZERO_AMP (1.0)
+#define ZERO_PHASE (0)
+#define ZERO_PHASE_BIAS (0)
+#define A_FIRST_OCTAVE_FREQ (410)
 
 typedef struct {
 	float *wave_table;
+	float amp;
 	jack_nframes_t sample_rate;
 	unsigned int freq;
 	int current_phase;
 	int phase_bias;
-	int phase_step;
-	jack_port_t *output_port;
+
 	jack_client_t *client;
+	jack_port_t *output_port;
+	char *name;
 } Oscillator ;
 /*
 static void signal_handler(int sig)
@@ -50,8 +57,7 @@ static void signal_handler(int sig)
  * running, copy the input port to the output.  When it stops, exit.
  */
 
-int process(jack_nframes_t nframes, void *arg){
-	Oscillator *osc = (Oscillator *)arg ;
+int oscillate(jack_nframes_t nframes, Oscillator *osc){
 	jack_nframes_t current_frames;
 	jack_time_t current_usecs, next_usecs;
 	float period_usecs;
@@ -62,14 +68,14 @@ int process(jack_nframes_t nframes, void *arg){
 	                                    &period_usecs ) ;
 	int delta_usecs = next_usecs - current_usecs ;
 #ifdef DBG
-	fprintf(stderr, "[DBG] :\tcycle_times    = %d\n"
+	fprintf(stderr, "[DBG:%s] :\tcycle_times    = %d\n"
 	       "\tnframes        = %u ;\n"
 	       "\tcurrent_frames = %u ;\n"
 	       "\tcurrent_usecs  = %u ;\n"
 	       "\tnext_usecs     = %u ;\n"
 	       "\tperiod_usecs   = %f ;\n"
 	       "\tdelta_usecs    = %u ;\n",
-	       cycle_times,
+	       osc->name, cycle_times,
 	       nframes,
 	       current_frames,
 	       current_usecs,
@@ -78,35 +84,111 @@ int process(jack_nframes_t nframes, void *arg){
 	       delta_usecs);
 #endif /* DBG */
 	jack_default_audio_sample_t *out;
-	int i;
 	out = (jack_default_audio_sample_t *)jack_port_get_buffer (osc->output_port, nframes);
-	for( i=0 ; i<nframes ; ++i ){ /* Processing N frames of output buffer(I thought I will use delta-t ore something). */
-		out[i] = osc->wave_table[osc->current_phase] ;
-		osc->current_phase += osc->phase_step * osc->freq ;
-		if( osc->current_phase >= osc->sample_rate ) osc->current_phase -= osc->sample_rate ;
+	for( int i=0 ; i<nframes ; ++i ){ /* Processing N frames of output buffer(I thought I will use delta-t ore something). */
+		int real_phase =  (osc->current_phase+osc->phase_bias) % osc->sample_rate ;
+		out[i] = osc->wave_table[real_phase] * osc->amp ;
+		osc->current_phase = osc->current_phase + osc->freq ;
+		if( osc->current_phase >= osc->sample_rate + osc->phase_bias )
+			osc->current_phase -= osc->sample_rate ;
 	}
 	return 0 ;
+}
+
+int oscsetamp(Oscillator *osc, float amp){
+	osc->amp = amp ;
+	return 0 ;
+}
+
+int oscsetfreq(Oscillator *osc, float freq){
+	osc->freq = freq ;
+	return 0 ;
+}
+
+int oscsetcurphase(Oscillator *osc, int current_phase){
+	osc->current_phase = current_phase % osc->sample_rate ;
+	return 0 ;
+}
+
+int oscsetphasebias(Oscillator *osc, int phase_bias){
+	osc->phase_bias = phase_bias ;
+	return 0 ;
+}
+
+int oscsetname(Oscillator *osc, char *name){
+	osc->name = name ;
+	return 0 ;
+}
+
+Oscillator *mkosc(jack_client_t *client, char *name){
+	/* Creates oscillator in 'osc' pointer. */
+	Oscillator *osc = malloc(SIZEL(osc)) ;
+	osc->client = client ;
+	osc->sample_rate = jack_get_sample_rate(osc->client) ;
+	osc->wave_table = malloc(SIZEL(osc->wave_table)*osc->sample_rate) ;
+	oscsetfreq(osc, A_FIRST_OCTAVE_FREQ);
+	oscsetcurphase(osc, ZERO_PHASE);
+	oscsetphasebias(osc, ZERO_PHASE_BIAS);
+	oscsetamp(osc, ZERO_AMP);
+	oscsetname(osc, name);
+	/* Ports creation. */
+	osc->output_port = jack_port_register (osc->client, "out",
+	                    JACK_DEFAULT_AUDIO_TYPE,
+	                    JackPortIsOutput, 0) ;
+	return osc ;
+}
+
+
+void mksinarr(float arr[], size_t siz){
+	for( int i=0 ; i<siz ; i++ ){
+		arr[i] = (float) sin( ((double)i/(double)siz) * M_PI * 2. ) ;
+	}
+}
+
+void mksawarr(float arr[], size_t siz){
+	for( int i=0 ; i<siz ; ++i ){
+		arr[i] = (double)i/siz ;
+	}
+}
+
+void mkpulsearr(float arr[], size_t siz){
+	int half_siz = siz/2 ;
+	for( int i=0 ; i<siz ; ++i ){
+		arr[i] = (float)((int)i/half_siz) ;
+	}
+}
+
+int process(jack_nframes_t nframes, void *arg){
+	Oscillator *osc = (Oscillator *)arg ;
+	return oscillate(nframes, osc) ;
 }
 
 /**
  * JACK calls this shutdown_callback if the server ever shuts down or
  * decides to disconnect the client.
  */
-void
-jack_shutdown (void *arg)
-{
-	exit (1);
+void jack_shutdown (void *arg){
+	exit(1);
 }
 
-int
-main(int argc, char *argv[]){
+void usage(char **argv0){
+	exit(1);
+}
+
+int main(int argc, char *argv[]){
 	const char **ports;
 	const char *client_name;
 	const char *server_name = NULL;
+	float *wave_table;
 	jack_options_t options = JackNullOption;
 	jack_status_t status;
-	Oscillator osc;
+	jack_client_t *client;
+	Oscillator *osc;
 	int i;
+
+	/*if( argc<3 ){
+		usage(argv);
+	}*/
 
 	if( argc >= 2 ){/* Client name specified? */
 		client_name = argv[1];
@@ -124,11 +206,14 @@ main(int argc, char *argv[]){
 		}
 	}
 
+
+	//client_name = argv[1] ;
+
 	/* Open a client connection to the JACK server. */
-	osc.client = jack_client_open (client_name, options, &status, server_name);
-	if (osc.client == NULL) {
+	client = jack_client_open(client_name, options, &status, server_name) ;
+	if (client == NULL) {
 		fprintf (stderr, "jack_client_open() failed, "
-			 "status = 0x%2.0x\n", status);
+			            "status = 0x%2.0x\n", status);
 		if (status & JackServerFailed) {
 			fprintf (stderr, "%s: unable to connect to JACK server\n", argv[0]);
 		}
@@ -136,39 +221,24 @@ main(int argc, char *argv[]){
 	}if( status & JackServerStarted ){
 		fprintf (stderr, "JACK server started\n");
 	}if(status & JackNameNotUnique){
-		client_name = jack_get_client_name(osc.client);
 		fprintf (stderr, "unique name `%s' assigned\n", client_name);
 	}
-
-	osc.sample_rate = jack_get_sample_rate(osc.client) ;
-	osc.wave_table = malloc(sizeof(osc.wave_table[0]) * osc.sample_rate ) ;
-	osc.current_phase = 0 ;
-	osc.phase_bias = 0 ;
-	osc.phase_step = 1 ;
-	osc.freq = 410 ;
-
-	for( i=0; i<osc.sample_rate; i++ ){
-		osc.wave_table[i] = 0.1 * (float) sin( ((double)i/(double)osc.sample_rate) * M_PI * 2. );
-	}
-
+	osc = mkosc(client, "01") ;
+	mkpulsearr(osc->wave_table, osc->sample_rate);
 
 	/* Tell the JACK server to call `process()' whenever
 	 * there is work to be done. */
 
-	jack_set_process_callback(osc.client, process, &osc);
+	jack_set_process_callback(osc->client, process, osc);
 
 	/* Tell the JACK server to call `jack_shutdown()' if
 	 * it ever shuts down, either entirely, or if it
 	 * just decides to stop calling us. */
 
-	jack_on_shutdown(osc.client, jack_shutdown, 0);
+	jack_on_shutdown(osc->client, jack_shutdown, 0);
 
-	/* Ports creation. */
-	osc.output_port = jack_port_register (osc.client, "out",
-	                    JACK_DEFAULT_AUDIO_TYPE,
-	                    JackPortIsOutput, 0) ;
 
-	if ((osc.output_port == NULL) ) {
+	if ((osc->output_port == NULL) ) {
 		fprintf(stderr, "%s: no more JACK ports available.\n", argv[0]);
 		exit (1);
 	}
@@ -176,9 +246,9 @@ main(int argc, char *argv[]){
 	/* Tell the JACK server that we are ready to roll.  Our
 	 * process() callback will start running now. */
 
-	if (jack_activate (osc.client)) {
+	if (jack_activate(osc->client)) {
 		fprintf (stderr, "%s: cannot activate client.\n", argv[0]);
-		exit (1);
+		exit(1);
 	}
 
 	/* Connect the ports.  You can't do this before the client is
@@ -218,14 +288,13 @@ main(int argc, char *argv[]){
 
 	/* Keep running until the Ctrl+C. */
 	while (1) {
-	#ifdef WIN32 
+	#ifdef WIN32
 		Sleep(1000);
 	#else
 		usleep(20000);
-		++osc.freq;
 	#endif
 	}
 
-	jack_client_close (osc.client);
+	jack_client_close (osc->client);
 	exit (0);
 }
