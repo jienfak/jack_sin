@@ -56,6 +56,7 @@ int oscillate(jack_nframes_t nframes, Oscillator *osc){
 		int analog_freq_mod_val = analog2int(freq_mod[i], osc->sample_rate) ;
 		
 		osc->current_phase +=  osc->freq+analog_freq_mod_val ; /* Modulating frequency. */
+		osc->current_phase %= osc->sample_rate ;
 		
 		//if( osc->current_phase + osc->phase_bias >= osc->sample_rate  ){
 			/* Looping. */

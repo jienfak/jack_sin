@@ -112,7 +112,7 @@ int main(int argc, char *argv[]){
 	mksinarr(osc1->wave_table, osc->sample_rate);
 
 	oscs[0] = osc; oscs[1] = osc1 ;	
-	oscsetfreq(osc1, 50);
+	oscsetfreq(osc1, 210);
 
 	arg->oscs_amt = 2 ;
 	
