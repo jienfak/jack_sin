@@ -1,9 +1,22 @@
 /* Simple oscillator abstraction module. */
-#include "osc.h"
-#include <math.h>
 
+#include <math.h>
+#include <jack/jack.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+#include "osc.h"
+#ifndef M_PI
+	#define M_PI  (3.14159265)
+#endif
+static int analog2int(float analog, int max){
+	return (int)((float)max*analog) ;
+}
 int oscillate(jack_nframes_t nframes, Oscillator *osc){
 	/* Oscillate for "nframes" frames. */
+#ifdef DBG
 	jack_nframes_t current_frames;
 	jack_time_t current_usecs, next_usecs;
 	float period_usecs;
@@ -13,7 +26,6 @@ int oscillate(jack_nframes_t nframes, Oscillator *osc){
 	                                    &next_usecs,
 	                                    &period_usecs ) ;
 	int delta_usecs = next_usecs - current_usecs ;
-#ifdef DBG
 	fprintf(stderr, "[DBG:%s] :\tcycle_times    = %d\n"
 	       "\tnframes        = %u ;\n"
 	       "\tcurrent_frames = %u ;\n"
@@ -29,14 +41,28 @@ int oscillate(jack_nframes_t nframes, Oscillator *osc){
 	       period_usecs,
 	       delta_usecs);
 #endif /* DBG */
-	jack_default_audio_sample_t *out;
-	out = (jack_default_audio_sample_t *)jack_port_get_buffer (osc->output_port, nframes);
-	for( int i=0 ; i<nframes ; ++i ){ /* Processing N frames of output buffer(I thought I will use delta-t ore something). */
-		int real_phase =  (osc->current_phase+osc->phase_bias) % osc->sample_rate ;
-		out[i] = osc->wave_table[real_phase] * osc->amp ;
-		osc->current_phase = osc->current_phase + osc->freq ;
-		if( osc->current_phase >= osc->sample_rate + osc->phase_bias )
-			osc->current_phase -= osc->sample_rate ;
+	jack_default_audio_sample_t *out, *amp_mod, *freq_mod, *pb_mod;
+	out = jack_port_get_buffer (osc->output_port, nframes);
+	amp_mod = jack_port_get_buffer(osc->amp_mod_port, nframes) ;
+	freq_mod = jack_port_get_buffer(osc->freq_mod_port, nframes) ;
+	pb_mod = jack_port_get_buffer(osc->phase_bias_mod_port, nframes) ;
+	
+	for( int i=0 ; i<nframes ; ++i ){ /* Processing N frames of output buffer. */
+		/* Modulating phase. */
+		int real_phase =  (osc->current_phase+osc->phase_bias+analog2int(pb_mod[i], osc->sample_rate)) % osc->sample_rate ;
+
+		out[i] = osc->wave_table[real_phase] * (osc->amp*( 1.0+analog2int(amp_mod[i], osc->sample_rate)) ) ; /* Modulating amplitude. */
+
+		int analog_freq_mod_val = analog2int(freq_mod[i], osc->sample_rate) ;
+		
+		osc->current_phase +=  osc->freq+analog_freq_mod_val ; /* Modulating frequency. */
+		
+		//if( osc->current_phase + osc->phase_bias >= osc->sample_rate  ){
+			/* Looping. */
+			//osc->current_phase -= osc->sample_rate ;
+		//}
+		
+		
 	}
 	return 0 ;
 }
@@ -62,12 +88,21 @@ int oscsetphasebias(Oscillator *osc, int phase_bias){
 }
 
 int oscsetname(Oscillator *osc, char *name){
-	osc->name = name ;
+	strncpy(osc->name, name, BUFSIZ);
 	return 0 ;
+}
+
+static char *bufcat(char *buf, char *cat){
+	char *ret = malloc(sizeof(char)*BUFSIZ) ;
+	strncpy(ret, buf, BUFSIZ);
+	strncat(ret, cat, BUFSIZ);
+	return ret ;
 }
 
 Oscillator *mkosc(jack_client_t *client, char *name){
 	/* Returns pointer to new oscillator structure. */
+	
+	
 	Oscillator *osc = malloc(SIZEL(osc)) ;
 	osc->client = client ;
 	osc->sample_rate = jack_get_sample_rate(osc->client) ;
@@ -75,12 +110,24 @@ Oscillator *mkosc(jack_client_t *client, char *name){
 	oscsetfreq(osc, A_FIRST_OCTAVE_FREQ);
 	oscsetcurphase(osc, ZERO_PHASE);
 	oscsetphasebias(osc, ZERO_PHASE_BIAS);
-	oscsetamp(osc, ZERO_AMP);
+	oscsetamp(osc, 0.1);
 	oscsetname(osc, name);
 	/* Ports creation. */
-	osc->output_port = jack_port_register (osc->client, "out",
+	osc->output_port = jack_port_register (osc->client, osc->name,
 	                    JACK_DEFAULT_AUDIO_TYPE,
 	                    JackPortIsOutput, 0) ;
+	/* Frequency. */
+	osc->freq_mod_port = jack_port_register(osc->client, bufcat(osc->name, "_freq_mod"),
+		JACK_DEFAULT_AUDIO_TYPE,
+		JackPortIsInput, 0) ;
+	/* Phase bias. */
+	osc->phase_bias_mod_port = jack_port_register(osc->client, bufcat(osc->name, "_pb_mod"),
+		JACK_DEFAULT_AUDIO_TYPE,
+		JackPortIsInput, 0) ;
+	/* Amplitude. */
+	osc->amp_mod_port = jack_port_register(osc->client, bufcat(osc->name, "_amp_mod"),
+		JACK_DEFAULT_AUDIO_TYPE,
+		JackPortIsInput, 0) ;
 	return osc ;
 }
 

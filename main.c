@@ -8,7 +8,11 @@
 #include <jack/jack.h>
 #include "osc.h"
 
-
+#define MAX_OSCILLATORS_AMOUNT 64
+typedef struct {
+	Oscillator **oscs;
+	int oscs_amt;
+} Arg ;
 
 /*
 static void signal_handler(int sig)
@@ -31,12 +35,15 @@ static void signal_handler(int sig)
 
 
 
-int process(jack_nframes_t nframes, void *arg){
-	Oscillator *osc = (Oscillator *)arg ;
-	return oscillate(nframes, osc) ;
+int process(jack_nframes_t nframes, void *out_arg){
+	Arg *arg = (Arg *)out_arg ;
+	for( int i=0 ; i < arg->oscs_amt ; ++i ){
+		oscillate(nframes, arg->oscs[i]);
+	}
+	return 0 ;
 }
 
-/**
+/*
  * JACK calls this shutdown_callback if the server ever shuts down or
  * decides to disconnect the client.
  */
@@ -56,7 +63,10 @@ int main(int argc, char *argv[]){
 	jack_options_t options = JackNullOption;
 	jack_status_t status;
 	jack_client_t *client;
-	Oscillator *osc;
+	Oscillator *osc, *osc1;
+	Arg *arg = malloc(sizeof(Arg)) ;
+	Oscillator **oscs = (Oscillator **)malloc(sizeof(Oscillator *)*MAX_OSCILLATORS_AMOUNT) ;
+	arg->oscs = oscs ;
 	int i;
 
 	/*if( argc<3 ){
@@ -97,12 +107,20 @@ int main(int argc, char *argv[]){
 		fprintf (stderr, "unique name `%s' assigned\n", client_name);
 	}
 	osc = mkosc(client, "01") ;
-	mkpulsearr(osc->wave_table, osc->sample_rate);
+	mksinarr(osc->wave_table, osc->sample_rate);
+	osc1 = mkosc(client, "02") ;
+	mksinarr(osc1->wave_table, osc->sample_rate);
+
+	oscs[0] = osc; oscs[1] = osc1 ;	
+	oscsetfreq(osc1, 50);
+
+	arg->oscs_amt = 2 ;
+	
 
 	/* Tell the JACK server to call `process()' whenever
 		there is work to be done. */
 
-	jack_set_process_callback(osc->client, process, osc);
+	jack_set_process_callback(osc->client, process, arg);
 
 	/* Tell the JACK server to call `jack_shutdown()' if
 	 * it ever shuts down, either entirely, or if it
