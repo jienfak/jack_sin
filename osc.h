@@ -21,23 +21,17 @@ typedef struct {
 	jack_port_t *freq_mod_port;
 
 	int current_phase;
-	jack_port_t *phase_bias_mod_port;
+	jack_port_t *phase_mod_port;
 	int phase_bias;
 
 	jack_client_t *client;
 	jack_port_t *output_port;
-	char name[BUFSIZ];
+	char name[64];
 } Oscillator ;
 
 int oscillate(jack_nframes_t nframes, Oscillator *osc); /* Oscillate for "nframes" frames. */
-int oscsetamp(Oscillator *osc, float amp); /* Set amplitude.*/
-int oscsetfreq(Oscillator *osc, float freq); /* Set frequency. */
-int oscsetcurphase(Oscillator *osc, int current_phase); /* Set current phase. */
-int oscsetphasebias(Oscillator *osc, int phase_bias); /* Set phase bias. */
-int oscsetname(Oscillator *osc, char *name); /* Set name. */
-Oscillator *mkosc(jack_client_t *client, char *name); /* Create standard oscillator. */
-void mksinarr(float arr[], size_t siz); /* Sine shape. */
-void mksawarr(float arr[], size_t siz); /* Saw shape. */
-void mkpulsearr(float arr[], size_t siz);
-
+Oscillator *osc_new(jack_client_t *client, char *name);
+void osc_make_sin(Oscillator *osc);
+void osc_make_saw(Oscillator *osc);
+void osc_make_pulse(Oscillator *osc);
 #endif /* OSC_H__ */

@@ -59,7 +59,6 @@ int main(int argc, char *argv[]){
 	const char **ports;
 	const char *client_name;
 	const char *server_name = NULL;
-	float *wave_table;
 	jack_options_t options = JackNullOption;
 	jack_status_t status;
 	jack_client_t *client;
@@ -106,13 +105,13 @@ int main(int argc, char *argv[]){
 	}if(status & JackNameNotUnique){
 		fprintf (stderr, "unique name `%s' assigned\n", client_name);
 	}
-	osc = mkosc(client, "01") ;
-	mksinarr(osc->wave_table, osc->sample_rate);
-	osc1 = mkosc(client, "02") ;
-	mksinarr(osc1->wave_table, osc->sample_rate);
+	osc = osc_new(client, "01") ;
+	osc1 = osc_new(client, "02") ;
+	osc_make_sin(osc);
+	osc_make_sin(osc1);
 
 	oscs[0] = osc; oscs[1] = osc1 ;	
-	oscsetfreq(osc1, 210);
+	osc_set_freq(osc1, 12);
 
 	arg->oscs_amt = 2 ;
 	
@@ -131,7 +130,7 @@ int main(int argc, char *argv[]){
 
 	if ((osc->output_port == NULL) ) {
 		fprintf(stderr, "%s: no more JACK ports available.\n", argv[0]);
-		exit (1);
+		exit(1);
 	}
 
 	/* Tell the JACK server that we are ready to roll.  Our
@@ -178,13 +177,8 @@ int main(int argc, char *argv[]){
 #endif
 
 	/* Keep running until the Ctrl+C. */
-	while (1) {
-	#ifdef WIN32
-		Sleep(1000);
-	#else
-		usleep(20000);
-	#endif
-	}
+	while (1)
+		;
 
 	jack_client_close (osc->client);
 	exit (0);
